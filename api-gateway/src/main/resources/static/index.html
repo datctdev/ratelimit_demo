@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Seminar MSS301: Bucket4j & Gateway Rate Limiter</title>
+    <style>
+        :root {
+            --primary: #0f4c81;
+            --secondary: #008080;
+            --success: #198754;
+            --danger: #dc3545;
+            --warning: #f59e0b;
+            --bg: #f1f5f9;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+        body { background: var(--bg); color: var(--text); padding: 18px; }
+        .header {
+            background: linear-gradient(135deg, #0f4c81, #008080);
+            color: white; padding: 18px 24px; border-radius: 12px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 4px 12px rgba(15,76,129,0.2); margin-bottom: 18px;
+        }
+        .header h1 { font-size: 20px; font-weight: 700; }
+        .header p { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+        .badge-docker {
+            background: rgba(255,255,255,0.2); padding: 8px 14px; border-radius: 8px;
+            font-size: 12px; font-weight: 600; border: 1px solid rgba(255,255,255,0.35);
+        }
+        .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
+        .card {
+            background: var(--card); border-radius: 12px; padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;
+        }
+        .card-title {
+            font-size: 15px; font-weight: 700; color: var(--primary);
+            margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;
+        }
+        .mode-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+        .mode-btn {
+            padding: 10px 12px; border-radius: 8px; border: 2px solid #cbd5e1;
+            background: #f8fafc; cursor: pointer; text-align: left; transition: 0.2s;
+        }
+        .mode-btn.active { border-color: var(--primary); background: #ebf3fa; }
+        .mode-btn strong { display: block; font-size: 13.5px; color: var(--primary); }
+        .mode-btn span { font-size: 11.5px; color: #64748b; }
+
+        /* Visual Token Bucket */
+        .bucket-wrapper {
+            background: #fff9e6; border: 3px solid #d4ac0d; border-top: none;
+            border-radius: 0 0 20px 20px; padding: 14px; min-height: 150px;
+            display: flex; flex-direction: column; justify-content: space-between;
+            align-items: center; position: relative; margin: 12px 0;
+        }
+        .bucket-wrapper.empty { background: #f8d7da; border-color: #dc3545; }
+        .faucet-bar {
+            background: #0f4c81; color: white; font-size: 12px; font-weight: 600;
+            padding: 6px 12px; border-radius: 6px; text-align: center; width: 100%;
+        }
+        .tokens-grid {
+            display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+            margin: 12px 0; width: 100%; justify-items: center;
+        }
+        .token-coin {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #ffd700, #d4ac0d);
+            border: 2px solid #b7950b; color: #5c4300; font-weight: 800;
+            font-size: 12px; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15); transition: 0.25s transform, 0.25s opacity;
+        }
+        .token-coin.used {
+            background: #e2e8f0; border-color: #cbd5e1; color: #94a3b8;
+            transform: scale(0.8); opacity: 0.4; box-shadow: none;
+        }
+        .bucket-status { font-size: 14px; font-weight: 700; color: #856404; }
+        .bucket-wrapper.empty .bucket-status { color: #dc3545; }
+
+        .btn-group { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+        .btn {
+            padding: 12px 16px; border: none; border-radius: 8px; font-size: 14px;
+            font-weight: 700; cursor: pointer; color: white; transition: 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn:hover { opacity: 0.92; transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-single { background: var(--success); }
+        .btn-burst { background: var(--danger); }
+        .btn-reset { background: #475569; }
+
+        /* Stats Row */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+        .stat-box {
+            padding: 12px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0;
+        }
+        .stat-box .num { font-size: 24px; font-weight: 800; margin-top: 4px; }
+        .stat-box .lbl { font-size: 12px; font-weight: 600; color: #475569; }
+        .stat-total { background: #f8fafc; color: var(--primary); }
+        .stat-ok { background: #d1e7dd; color: var(--success); border-color: #badbcc; }
+        .stat-block { background: #f8d7da; color: var(--danger); border-color: #f5c2c7; }
+        .stat-backend { background: #ebf3fa; color: #0f4c81; border-color: #b6d4fe; }
+
+        /* Table */
+        .table-container { max-height: 440px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        th {
+            background: var(--primary); color: white; padding: 10px;
+            text-align: left; position: sticky; top: 0;
+        }
+        td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+        tr.row-200 { background: #f4fbf7; }
+        tr.row-429 { background: #fff5f5; }
+        .badge {
+            padding: 4px 8px; border-radius: 6px; font-weight: 700; font-size: 11.5px; display: inline-block;
+        }
+        .badge-200 { background: #198754; color: white; }
+        .badge-429 { background: #dc3545; color: white; }
+        code { font-family: Consolas, monospace; font-size: 11.5px; background: rgba(0,0,0,0.05); padding: 2px 5px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div>
+        <h1>🛡️ LIVE DEMO: BUCKET4J & SPRING CLOUD GATEWAY RATE LIMITER</h1>
+        <p>Hệ thống Microservices chạy trên Docker Compose: [Client] ➔ [API Gateway :8080 + Redis :6379] ➔ [Orchid-Service :8082]</p>
+    </div>
+    <div class="badge-docker">
+        Cấu hình: application.properties<br>
+        Capacity = 10 Tokens
+    </div>
+</div>
+
+<div class="grid">
+    <!-- Left Column: Controls & Visual Bucket -->
+    <div class="card">
+        <div class="card-title">1. CHỌN CƠ CHẾ RATE LIMITER</div>
+        <div class="mode-group">
+            <button class="mode-btn active" id="mode-bucket4j" onclick="selectMode('bucket4j')">
+                <strong>Chế độ 1: Bucket4j Filter (Khuyên dùng Demo)</strong>
+                <span>Route: /api/bucket4j/orchids (Capacity: 10, Nạp: 1 token/2s)</span>
+            </button>
+            <button class="mode-btn" id="mode-redis" onclick="selectMode('redis')">
+                <strong>Chế độ 2: Gateway RequestRateLimiter + Redis</strong>
+                <span>Route: /api/redis/orchids (Capacity: 10, Nạp: 1 token/1s)</span>
+            </button>
+            <button class="mode-btn" id="mode-unlimited" onclick="selectMode('unlimited')">
+                <strong>Chế độ 3: Không bảo vệ (Unlimited - Để so sánh)</strong>
+                <span>Route: /api/unlimited/orchids (Không giới hạn - Dễ quá tải)</span>
+            </button>
+        </div>
+
+        <div class="card-title">2. MÔ PHỎNG THÙNG CHỨA (TOKEN BUCKET)</div>
+        <div class="faucet-bar" id="faucet-text">💧 Vòi bơm: Nạp 1 Token mới mỗi 2 giây | Dung lượng tối đa: 10</div>
+        <div class="bucket-wrapper" id="bucket-box">
+            <div class="tokens-grid" id="tokens-grid"></div>
+            <div class="bucket-status" id="bucket-status-text">Token khả dụng: 10 / 10</div>
+        </div>
+
+        <div class="btn-group">
+            <button class="btn btn-single" id="btn-one" onclick="sendSingleRequest()">
+                🟢 Gửi 1 Request Đơn Lẻ (Tiêu 1 Token)
+            </button>
+            <button class="btn btn-burst" id="btn-burst" onclick="sendBurstRequests()">
+                🔥 Bắn 20 Requests Liên Tiếp (Burst Attack!)
+            </button>
+            <button class="btn btn-reset" onclick="resetAll()">
+                🔄 Reset Đầy Thùng Token (10/10) & Xóa Bảng
+            </button>
+        </div>
+    </div>
+
+    <!-- Right Column: Live Metrics & Request Table -->
+    <div class="card">
+        <div class="card-title">3. KẾT QUẢ THỰC TẾ TRÊN GATEWAY & ORCHID-SERVICE</div>
+        <div class="stats-grid">
+            <div class="stat-box stat-total">
+                <div class="lbl">TỔNG REQUEST ĐÃ GỬI</div>
+                <div class="num" id="stat-total">0</div>
+            </div>
+            <div class="stat-box stat-ok">
+                <div class="lbl">GATEWAY CHO QUA (200 OK)</div>
+                <div class="num" id="stat-ok">0</div>
+            </div>
+            <div class="stat-box stat-block">
+                <div class="lbl">GATEWAY CHẶN ĐỨNG (429)</div>
+                <div class="num" id="stat-429">0</div>
+            </div>
+            <div class="stat-box stat-backend">
+                <div class="lbl">ORCHID-SERVICE XỬ LÝ</div>
+                <div class="num" id="stat-backend">0</div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 55px;">#</th>
+                        <th style="width: 95px;">Thời gian</th>
+                        <th style="width: 175px;">Route gọi</th>
+                        <th style="width: 150px;">Trạng thái HTTP</th>
+                        <th style="width: 120px;">Token còn lại</th>
+                        <th>Phản hồi từ Gateway / Orchid-Service</th>
+                    </tr>
+                </thead>
+                <tbody id="log-tbody">
+                    <tr>
+                        <td colspan="6" style="text-align:center; padding: 24px; color:#64748b;">
+                            Nhấn nút <strong>"Gửi 1 Request"</strong> hoặc <strong>"Bắn 20 Requests Liên Tiếp"</strong> ở cột bên trái để bắt đầu Demo!
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentMode = 'bucket4j';
+    let totalSent = 0;
+    let totalOk = 0;
+    let total429 = 0;
+    let backendCount = 0;
+    let currentTokens = 10;
+
+    function renderBucket(tokens) {
+        const grid = document.getElementById('tokens-grid');
+        const box = document.getElementById('bucket-box');
+        const statusText = document.getElementById('bucket-status-text');
+        grid.innerHTML = '';
+
+        if (currentMode === 'unlimited') {
+            box.classList.remove('empty');
+            statusText.innerText = 'Chế độ Không Giới Hạn (Không dùng Token)';
+            for (let i = 1; i <= 10; i++) {
+                const c = document.createElement('div');
+                c.className = 'token-coin';
+                c.innerText = '∞';
+                grid.appendChild(c);
+            }
+            return;
+        }
+
+        const safeTokens = Math.max(0, Math.min(10, tokens));
+        for (let i = 1; i <= 10; i++) {
+            const coin = document.createElement('div');
+            coin.className = i <= safeTokens ? 'token-coin' : 'token-coin used';
+            coin.innerText = 'T' + i;
+            grid.appendChild(coin);
+        }
+
+        if (safeTokens === 0) {
+            box.classList.add('empty');
+            statusText.innerText = '⚠️ HẾT TOKEN (0 / 10) - MỌI REQUEST TIẾP THEO SẼ BỊ CHẶN 429!';
+        } else {
+            box.classList.remove('empty');
+            statusText.innerText = `Token khả dụng trong thùng: ${safeTokens} / 10`;
+        }
+    }
+
+    function selectMode(mode) {
+        currentMode = mode;
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('mode-' + mode).classList.add('active');
+        const faucet = document.getElementById('faucet-text');
+        if (mode === 'bucket4j') {
+            faucet.innerText = '💧 Vòi bơm Bucket4j: Nạp 1 Token mỗi 2 giây | Capacity: 10';
+        } else if (mode === 'redis') {
+            faucet.innerText = '💧 Vòi bơm Redis Lua Script: Nạp 1 Token mỗi 1 giây | Capacity: 10';
+        } else {
+            faucet.innerText = '⚠️ Không có Rate Limiter: Mọi request đi thẳng vào Orchid-Service!';
+        }
+        renderBucket(currentTokens);
+    }
+
+    function getEndpoint() {
+        if (currentMode === 'bucket4j') return '/api/bucket4j/orchids';
+        if (currentMode === 'redis') return '/api/redis/orchids';
+        return '/api/unlimited/orchids';
+    }
+
+    async function fireOneRequest(seqNum) {
+        const endpoint = getEndpoint();
+        const startTime = new Date().toLocaleTimeString('vi-VN', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+        try {
+            const res = await fetch(endpoint, { cache: 'no-store' });
+            const status = res.status;
+            const remHeader = res.headers.get('X-RateLimit-Remaining');
+            const retryAfter = res.headers.get('Retry-After');
+            let bodyText = '';
+            try {
+                const data = await res.json();
+                if (status === 200) {
+                    backendCount = data.backendProcessedCount || (backendCount + 1);
+                    bodyText = `✅ Orchid-Service xử lý thành công (#${data.backendProcessedCount}) - Trả về ${data.data ? data.data.length : 1} loài hoa lan`;
+                } else {
+                    bodyText = `🛑 ${data.message || 'Blocked by Gateway Rate Limiter'} (Retry-After: ${retryAfter || 1}s)`;
+                }
+            } catch (e) {
+                bodyText = status === 429
+                    ? `🛑 Bị chặn ngay tại Spring Cloud Gateway (HTTP 429 Too Many Requests) - Orchid-Service được bảo vệ!`
+                    : `HTTP ${status}`;
+            }
+
+            totalSent++;
+            if (status === 200) {
+                totalOk++;
+                if (remHeader !== null) currentTokens = parseInt(remHeader, 10);
+                else if (currentMode !== 'unlimited') currentTokens = Math.max(0, currentTokens - 1);
+            } else if (status === 429) {
+                total429++;
+                currentTokens = 0;
+            }
+
+            updateStatsUI();
+            renderBucket(currentTokens);
+            appendLogRow(seqNum, startTime, endpoint, status, remHeader !== null ? remHeader : (currentMode === 'unlimited' ? '∞' : currentTokens), bodyText);
+        } catch (err) {
+            appendLogRow(seqNum, startTime, endpoint, 500, '-', 'Lỗi kết nối: ' + err.message);
+        }
+    }
+
+    function updateStatsUI() {
+        document.getElementById('stat-total').innerText = totalSent;
+        document.getElementById('stat-ok').innerText = totalOk;
+        document.getElementById('stat-429').innerText = total429;
+        document.getElementById('stat-backend').innerText = backendCount;
+    }
+
+    function appendLogRow(seq, time, endpoint, status, remaining, msg) {
+        const tbody = document.getElementById('log-tbody');
+        if (totalSent === 1 && tbody.children.length === 1 && tbody.children[0].children.length === 1) {
+            tbody.innerHTML = '';
+        }
+        const tr = document.createElement('tr');
+        tr.className = status === 200 ? 'row-200' : 'row-429';
+        const badgeHtml = status === 200
+            ? `<span class="badge badge-200">200 OK (Allowed)</span>`
+            : `<span class="badge badge-429">429 TOO MANY REQ</span>`;
+
+        tr.innerHTML = `
+            <td><strong>#${seq}</strong></td>
+            <td><code>${time}</code></td>
+            <td><code>${endpoint}</code></td>
+            <td>${badgeHtml}</td>
+            <td><strong>${remaining}</strong> / 10</td>
+            <td>${msg}</td>
+        `;
+        tbody.insertBefore(tr, tbody.firstChild);
+    }
+
+    async function sendSingleRequest() {
+        await fireOneRequest(totalSent + 1);
+    }
+
+    async function sendBurstRequests() {
+        const btnBurst = document.getElementById('btn-burst');
+        const btnOne = document.getElementById('btn-one');
+        btnBurst.disabled = true;
+        btnOne.disabled = true;
+
+        for (let i = 1; i <= 20; i++) {
+            await fireOneRequest(totalSent + 1);
+        }
+
+        btnBurst.disabled = false;
+        btnOne.disabled = false;
+    }
+
+    async function resetAll() {
+        await fetch('/api/bucket4j/reset');
+        await fetch('/api/unlimited/orchids/reset', { method: 'POST' }).catch(() => {});
+        totalSent = 0;
+        totalOk = 0;
+        total429 = 0;
+        backendCount = 0;
+        currentTokens = 10;
+        updateStatsUI();
+        renderBucket(10);
+        document.getElementById('log-tbody').innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align:center; padding: 24px; color:#198754; font-weight:600;">
+                    ✅ Đã nạp đầy lại 10/10 Tokens trong thùng và Reset bộ đếm Orchid-Service về 0! Sẵn sàng test lượt tiếp theo.
+                </td>
+            </tr>
+        `;
+    }
+
+    // Initialize visual bucket on load
+    renderBucket(10);
+</script>
+</body>
+</html>

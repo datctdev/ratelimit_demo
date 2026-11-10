@@ -1,0 +1,56 @@
+version: '3.8'
+
+# ==============================================================================
+# DOCKER COMPOSE: TOAN BO HE SINH THAI DEMO MICROSERVICES RATE LIMITER
+# Chay duy nhat 1 lenh: docker compose up -d --build
+# ==============================================================================
+services:
+
+  # 1. REDIS: Luu tru trang thai Token Bucket phan tan cho Gateway Rate Limiter
+  redis:
+    image: redis:7-alpine
+    container_name: mss301-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. ORCHID-SERVICE: Microservice Backend (Port 8082) duoc bao ve phia sau Gateway
+  orchid-service:
+    build:
+      context: ./orchid-service
+      dockerfile: Dockerfile
+    container_name: mss301-orchid-service
+    ports:
+      - "8082:8082"
+    networks:
+      - microservices-net
+
+  # 3. API-GATEWAY: Cong bao ve Spring Cloud Gateway + Bucket4j + Redis (Port 8080)
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: mss301-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ORCHID_SERVICE_URL=http://orchid-service:8082
+    depends_on:
+      redis:
+        condition: service_healthy
+      orchid-service:
+        condition: service_started
+    networks:
+      - microservices-net
+
+networks:
+  microservices-net:
+    driver: bridge
